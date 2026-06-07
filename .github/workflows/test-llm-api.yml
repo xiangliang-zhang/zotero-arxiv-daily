@@ -1,0 +1,98 @@
+name: Test LLM API
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/test-llm-api.yml
+
+jobs:
+  test-llm-api:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Test OpenAI-compatible chat API
+        env:
+          OPENAI_API_BASE: ${{ secrets.OPENAI_API_BASE }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          CUSTOM_CONFIG: ${{ vars.CUSTOM_CONFIG }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import re
+          import sys
+          import urllib.error
+          import urllib.parse
+          import urllib.request
+
+          base = os.environ.get("OPENAI_API_BASE", "").strip().rstrip("/")
+          key = os.environ.get("OPENAI_API_KEY", "").strip()
+          config = os.environ.get("CUSTOM_CONFIG", "")
+
+          model = None
+          in_llm = False
+          in_generation = False
+          for raw_line in config.splitlines():
+              line = raw_line.rstrip()
+              stripped = line.strip()
+              if not stripped or stripped.startswith("#"):
+                  continue
+              indent = len(line) - len(line.lstrip(" "))
+              if indent == 0:
+                  in_llm = stripped == "llm:"
+                  in_generation = False
+                  continue
+              if in_llm and indent == 2:
+                  in_generation = stripped == "generation_kwargs:"
+                  continue
+              if in_llm and in_generation and indent >= 4:
+                  match = re.match(r"model:\s*(.+?)\s*(?:#.*)?$", stripped)
+                  if match:
+                      model = match.group(1).strip().strip('"\'')
+                      break
+
+          if not base:
+              print("FAIL: OPENAI_API_BASE is empty")
+              sys.exit(2)
+          if not key:
+              print("FAIL: OPENAI_API_KEY is empty")
+              sys.exit(2)
+          if not model:
+              print("FAIL: llm.generation_kwargs.model not found in CUSTOM_CONFIG")
+              sys.exit(2)
+
+          host = urllib.parse.urlparse(base).netloc or "<no-host>"
+          print(f"Testing model: {model}")
+          print(f"API host: {host}")
+
+          payload = {
+              "model": model,
+              "messages": [{"role": "user", "content": "Reply OK only."}],
+              "max_tokens": 10,
+          }
+          req = urllib.request.Request(
+              base + "/chat/completions",
+              data=json.dumps(payload).encode("utf-8"),
+              headers={
+                  "Authorization": "Bearer " + key,
+                  "Content-Type": "application/json",
+              },
+              method="POST",
+          )
+          try:
+              with urllib.request.urlopen(req, timeout=60) as resp:
+                  body = json.loads(resp.read().decode("utf-8"))
+          except urllib.error.HTTPError as exc:
+              detail = exc.read().decode("utf-8", errors="replace")[:1000]
+              print(f"FAIL: HTTP {exc.code}")
+              print(detail)
+              sys.exit(1)
+          except Exception as exc:
+              print(f"FAIL: {type(exc).__name__}: {exc}")
+              sys.exit(1)
+
+          message = body.get("choices", [{}])[0].get("message", {}).get("content", "")
+          print("OK: chat/completions request succeeded")
+          print("Response:", message[:120])
+          print("Returned model:", body.get("model", "<missing>"))
+          PY
