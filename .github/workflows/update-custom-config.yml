@@ -1,0 +1,94 @@
+name: Update CUSTOM_CONFIG
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/update-custom-config.yml
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  update-custom-config:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Update repository variable
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import urllib.request
+
+          repo = os.environ["REPO"]
+          token = os.environ["GH_TOKEN"]
+          api = f"https://api.github.com/repos/{repo}/actions/variables/CUSTOM_CONFIG"
+
+          value = """zotero:
+  user_id: ${oc.env:ZOTERO_ID}
+  api_key: ${oc.env:ZOTERO_KEY}
+  include_path: null # Or e.g. [\"2026/survey/**\", \"2026/reading-group/**\"]
+
+email:
+  sender: ${oc.env:SENDER}
+  receiver: ${oc.env:RECEIVER}
+  smtp_server: smtp.qq.com
+  smtp_port: 465
+  sender_password: ${oc.env:SENDER_PASSWORD}
+
+llm:
+  api:
+    key: ${oc.env:OPENAI_API_KEY}
+    base_url: ${oc.env:OPENAI_API_BASE}
+  generation_kwargs:
+    model: deepseek-v4-flash
+  language: Chinese
+
+source:
+  arxiv:
+    category: [\"cs.AI\",\"cs.CV\",\"cs.LG\",\"cs.CL\"]
+    include_cross_list: false # Set to true to include arXiv cross-list papers in these categories.
+
+executor:
+  debug: ${oc.env:DEBUG,null}
+  send_empty: false
+  max_paper_num: 5
+  source: ['arxiv']
+"""
+
+          body = json.dumps({"name": "CUSTOM_CONFIG", "value": value}).encode("utf-8")
+          req = urllib.request.Request(
+              api,
+              data=body,
+              method="PATCH",
+              headers={
+                  "Authorization": f"Bearer {token}",
+                  "Accept": "application/vnd.github+json",
+                  "Content-Type": "application/json",
+                  "X-GitHub-Api-Version": "2022-11-28",
+              },
+          )
+          with urllib.request.urlopen(req, timeout=60) as resp:
+              print("PATCH status:", resp.status)
+
+          req = urllib.request.Request(
+              api,
+              method="GET",
+              headers={
+                  "Authorization": f"Bearer {token}",
+                  "Accept": "application/vnd.github+json",
+                  "X-GitHub-Api-Version": "2022-11-28",
+              },
+          )
+          with urllib.request.urlopen(req, timeout=60) as resp:
+              updated = json.loads(resp.read().decode("utf-8"))["value"]
+
+          for key in ["model:", "language:", "send_empty:", "max_paper_num:"]:
+              for line in updated.splitlines():
+                  if line.strip().startswith(key):
+                      print(line.strip())
+          PY
