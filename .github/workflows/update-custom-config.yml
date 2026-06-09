@@ -6,10 +6,6 @@ on:
     paths:
       - .github/workflows/update-custom-config.yml
 
-permissions:
-  actions: write
-  contents: read
-
 jobs:
   update-custom-config:
     runs-on: ubuntu-latest
@@ -18,77 +14,29 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
+          CONFIG_B64: em90ZXJvOgogIHVzZXJfaWQ6ICR7b2MuZW52OlpPVEVST19JRH0KICBhcGlfa2V5OiAke29jLmVudjpaT1RFUk9fS0VZfQogIGluY2x1ZGVfcGF0aDogbnVsbCAjIE9yIGUuZy4gWyIyMDI2L3N1cnZleS8qKiIsICIyMDI2L3JlYWRpbmctZ3JvdXAvKioiXQoKZW1haWw6CiAgc2VuZGVyOiAke29jLmVudjpTRU5ERVJ9CiAgcmVjZWl2ZXI6ICR7b2MuZW52OlJFQ0VJVkVSfQogIHNtdHBfc2VydmVyOiBzbXRwLnFxLmNvbQogIHNtdHBfcG9ydDogNDY1CiAgc2VuZGVyX3Bhc3N3b3JkOiAke29jLmVudjpTRU5ERVJfUEFTU1dPUkR9CgpsbG06CiAgYXBpOgogICAga2V5OiAke29jLmVudjpPUEVOQUlfQVBJX0tFWX0KICAgIGJhc2VfdXJsOiAke29jLmVudjpPUEVOQUlfQVBJX0JBU0V9CiAgZ2VuZXJhdGlvbl9rd2FyZ3M6CiAgICBtb2RlbDogZGVlcHNlZWstdjQtZmxhc2gKICBsYW5ndWFnZTogQ2hpbmVzZQoKc291cmNlOgogIGFyeGl2OgogICAgY2F0ZWdvcnk6IFsiY3MuQUkiLCJjcy5DViIsImNzLkxHIiwiY3MuQ0wiXQogICAgaW5jbHVkZV9jcm9zc19saXN0OiBmYWxzZSAjIFNldCB0byB0cnVlIHRvIGluY2x1ZGUgYXJYaXYgY3Jvc3MtbGlzdCBwYXBlcnMgaW4gdGhlc2UgY2F0ZWdvcmllcy4KCmV4ZWN1dG9yOgogIGRlYnVnOiAke29jLmVudjpERUJVRyxudWxsfQogIHNlbmRfZW1wdHk6IGZhbHNlCiAgbWF4X3BhcGVyX251bTogNQogIHNvdXJjZTogWydhcnhpdidd
         run: |
           python - <<'PY'
+          import base64
           import json
           import os
           import urllib.request
 
-          repo = os.environ["REPO"]
+          value = base64.b64decode(os.environ["CONFIG_B64"]).decode("utf-8")
+          api = f"https://api.github.com/repos/{os.environ['REPO']}/actions/variables/CUSTOM_CONFIG"
           token = os.environ["GH_TOKEN"]
-          api = f"https://api.github.com/repos/{repo}/actions/variables/CUSTOM_CONFIG"
-
-          value = """zotero:
-  user_id: ${oc.env:ZOTERO_ID}
-  api_key: ${oc.env:ZOTERO_KEY}
-  include_path: null # Or e.g. [\"2026/survey/**\", \"2026/reading-group/**\"]
-
-email:
-  sender: ${oc.env:SENDER}
-  receiver: ${oc.env:RECEIVER}
-  smtp_server: smtp.qq.com
-  smtp_port: 465
-  sender_password: ${oc.env:SENDER_PASSWORD}
-
-llm:
-  api:
-    key: ${oc.env:OPENAI_API_KEY}
-    base_url: ${oc.env:OPENAI_API_BASE}
-  generation_kwargs:
-    model: deepseek-v4-flash
-  language: Chinese
-
-source:
-  arxiv:
-    category: [\"cs.AI\",\"cs.CV\",\"cs.LG\",\"cs.CL\"]
-    include_cross_list: false # Set to true to include arXiv cross-list papers in these categories.
-
-executor:
-  debug: ${oc.env:DEBUG,null}
-  send_empty: false
-  max_paper_num: 5
-  source: ['arxiv']
-"""
-
           body = json.dumps({"name": "CUSTOM_CONFIG", "value": value}).encode("utf-8")
-          req = urllib.request.Request(
-              api,
-              data=body,
-              method="PATCH",
-              headers={
-                  "Authorization": f"Bearer {token}",
-                  "Accept": "application/vnd.github+json",
-                  "Content-Type": "application/json",
-                  "X-GitHub-Api-Version": "2022-11-28",
-              },
-          )
+          headers = {
+              "Authorization": f"Bearer {token}",
+              "Accept": "application/vnd.github+json",
+              "Content-Type": "application/json",
+              "X-GitHub-Api-Version": "2022-11-28",
+          }
+          req = urllib.request.Request(api, data=body, headers=headers, method="PATCH")
           with urllib.request.urlopen(req, timeout=60) as resp:
               print("PATCH status:", resp.status)
-
-          req = urllib.request.Request(
-              api,
-              method="GET",
-              headers={
-                  "Authorization": f"Bearer {token}",
-                  "Accept": "application/vnd.github+json",
-                  "X-GitHub-Api-Version": "2022-11-28",
-              },
-          )
-          with urllib.request.urlopen(req, timeout=60) as resp:
-              updated = json.loads(resp.read().decode("utf-8"))["value"]
-
           for key in ["model:", "language:", "send_empty:", "max_paper_num:"]:
-              for line in updated.splitlines():
+              for line in value.splitlines():
                   if line.strip().startswith(key):
                       print(line.strip())
           PY
